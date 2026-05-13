@@ -198,9 +198,6 @@ print(f'OK: {b.slug} ({b.method})')
 
 # Run the full broker test suite
 uv run pytest tests/test_production_brokers.py -v
-
-# Check that all selectors are reachable on the live page
-uv run optout verify --broker your-broker --headed
 ```
 
 The CI pipeline runs `validate-brokers` on every push and PR, so any schema error will be caught there too.

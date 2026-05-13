@@ -103,7 +103,6 @@ optout queue   [--broker SLUG]       # add brokers to the submission queue
 optout submit  [--broker SLUG] [-v]  # process the queue; -v shows debug output
 optout status  [--broker] [--status] # table of submissions and deadlines
 optout monitor                       # one-shot re-scan (cron-friendly)
-optout verify  [--broker SLUG]       # check whether broker form selectors still work
 ```
 
 ---
@@ -168,7 +167,6 @@ cp src/optout/data/brokers/radaris.yml src/optout/data/brokers/new-broker.yml
 **5. Validate:**
 ```bash
 uv run pytest tests/test_production_brokers.py -v
-uv run optout verify --broker new-broker --headed
 ```
 
 Full step reference and template variables are in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -180,7 +178,7 @@ Full step reference and template variables are in [CONTRIBUTING.md](CONTRIBUTING
 - **Removal is not guaranteed.** Some brokers comply in days; others take the full 45-day window or ignore requests.
 - **Data reappears.** 60–90 days is typical. Run `optout monitor` monthly to catch this.
 - **CAPTCHAs require a human.** The tool pauses and prompts — no CAPTCHA solving, by design.
-- **Broker forms change.** When a broker redesigns their opt-out page, the YAML selectors need updating. `optout verify` catches this; `optout verify --headed` shows you exactly what changed.
+- **Broker forms change.** When a broker redesigns their opt-out page, the YAML selectors need updating. Use `debug_elements.py` locally to find the new selectors.
 - **Phone verification is manual.** Whitepages calls your phone; you enter the code. The tool waits.
 
 ---
