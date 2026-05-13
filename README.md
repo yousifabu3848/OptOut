@@ -53,13 +53,13 @@ optout monitor                   # re-scan; re-queues brokers that re-added you
 
 | Broker | Method | Automation | Human steps | Last verified |
 |--------|--------|-----------|-------------|---------------|
-| [BeenVerified](https://www.beenverified.com) | Web form | Partial | Click listing; solve Turnstile CAPTCHA | 2026-05-10 |
+| [BeenVerified](https://www.beenverified.com) | Web form | Partial | Click your listing; solve Turnstile CAPTCHA | 2026-05-10 |
 | [MyLife](https://www.mylife.com) | Web form | Partial | Solve reCAPTCHA; click Submit | 2026-05-10 |
-| [Radaris](https://radaris.com) | Web form | Mostly automated | Click listing; click "Start Removing" | 2026-05-10 |
-| [Spokeo](https://www.spokeo.com) | Web form | Partial | Click listing; confirm email | 2026-05-10 |
-| [Whitepages](https://www.whitepages.com) | Web form | Partial | Click listing; answer phone call | 2026-05-10 |
+| [Radaris](https://radaris.com) | Web form | Mostly automated | Click your listing; click "Start Removing"; click confirmation email | 2026-05-12 |
+| [Spokeo](https://www.spokeo.com) | Web form | Partial | Click your listing; solve reCAPTCHA; click confirmation email | 2026-05-12 |
+| [Whitepages](https://www.whitepages.com) | Web form | Partial | Click your listing; answer phone call; enter verification code | 2026-05-10 |
 
-All five brokers are verified end-to-end as of 2026-05-10. New brokers are added as YAML files — no Python required. See [CONTRIBUTING.md](CONTRIBUTING.md).
+All five brokers are verified end-to-end as of 2026-05-12. New brokers are added as YAML files — no Python required. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
