@@ -1,0 +1,149 @@
+slug: whitepages
+name: Whitepages
+domain: whitepages.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: "https://www.whitepages.com/suppression_requests"
+opt_out_email: "privacyrequest@whitepages.com"
+opt_out_postal_address: null
+
+required_fields: [listing_url, full_name, phone_current]
+optional_fields: [current_address]
+
+requires_listing_url: true
+requires_phone_verification: true
+requires_email_verification: false
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA, CPRA]
+statutory_response_days: 45
+re_add_window_days: 90
+
+last_verified_at: 2026-05-10
+notes: |
+  Opt-out at whitepages.com/suppression_requests (note: redirects to hyphen URL).
+
+  Flow (verified 2026-05-10):
+    1. Search results: user clicks their listing → Whitepages opens /checkout/ upsell
+       in a new tab. Engine captures the <a> href from the search result card
+       (pre-JS-redirect) which is the real /name/… profile URL.
+       Fallback: extract wpId from checkout URL and construct the profile URL.
+    2. Engine navigates to suppression_requests and types the URL using keyboard
+       events (React ignores fill() — must use keyboard.type).
+    3. Engine clicks Next → "Is this you?" page → clicks "Remove Me".
+    4. Engine clicks the removal reason, waits for Next to enable, clicks Next.
+    5. Phone page: user enters their phone and clicks "Call Now" manually,
+       then enters the code from the automated call on screen.
+       (Phone step selectors TBD — using prompt for now.)
+    6. Engine screenshots the confirmation.
+
+  Selectors verified 2026-05-10:
+    URL input:    input[id='suppression-requests-person-url']  (use_type: true)
+    Step 1 Next:  button.btn--large
+    Remove Me:    button:has-text("Remove Me")
+    Reason:       select.select → select_option("I am receiving spam calls and junk mailings")
+    Step 3 Next:  button.btn--large:not(.btn--disabled)
+    Phone input:  input[id='suppression-requests-phone-number']  (use_type: true)
+    Consent box:  input.checkbox
+    Call Now:     button:has-text("Call now to verify")
+
+  Whitepages verifies via automated phone call to the listing's number.
+  Data can reappear within ~90 days — re-run `optout monitor` to catch this.
+
+scan:
+  search_url_template: "https://www.whitepages.com/name/{name_title_slug}/{state}"
+  result_selector: "div.speedbump-card-wrapper"
+  match_fields: [full_name, current_address]
+
+steps:
+  - id: find_listing
+    type: search
+    label: "Find your Whitepages listing"
+    search_url_template: "https://www.whitepages.com/name/{name_title_slug}/{state}"
+    result_selector: "[data-testid='person-serp-content']"
+    pick_strategy: prompt_user
+
+  - id: open_optout_form
+    type: navigate
+    label: "Open suppression request form"
+    url: "https://www.whitepages.com/suppression_requests"
+
+  - id: fill_listing_url
+    type: form_fill
+    label: "Fill listing URL"
+    fields:
+      listing_url:
+        selector: "input[id='suppression-requests-person-url']"
+        value: "{state.found_listing_url}"
+        use_type: true
+
+  - id: click_next_step1
+    type: click
+    label: "Continue to next step"
+    selector: "button.btn--large"
+
+  - id: click_remove_me
+    type: click
+    label: "Click 'Remove Me'"
+    selector: "button:has-text(\"Remove Me\")"
+
+  - id: select_reason
+    type: form_fill
+    label: "Select removal reason"
+    fields:
+      reason:
+        selector: "select.select"
+        value: "I am receiving spam calls and junk mailings"
+
+  - id: wait_for_next_enabled
+    type: wait_for
+    label: "Wait for form to enable"
+    selector: "button.btn--large:not(.btn--disabled)"
+    timeout_ms: 10000
+
+  - id: click_next_step3
+    type: click
+    label: "Continue to phone step"
+    selector: "button.btn--large:not(.btn--disabled)"
+
+  - id: fill_phone
+    type: form_fill
+    label: "Fill phone number"
+    fields:
+      phone:
+        selector: "input[id='suppression-requests-phone-number']"
+        value: "{phone_current}"
+        use_type: true
+
+  - id: check_consent
+    type: click
+    label: "Check consent checkbox"
+    selector: "input.checkbox"
+
+  - id: click_call_now
+    type: click
+    label: "Request phone verification call"
+    selector: "button:has-text(\"Call now to verify\")"
+
+  - id: assert_call_initiated
+    type: assert
+    label: "Verify call verification started"
+    selector: "input[id='suppression-requests-phone-number'], .phone-verification, [class*='verification']"
+    optional: true
+
+  - id: phone_verify
+    type: prompt_user_if_present
+    selector: "body"
+    message: >-
+      Whitepages is calling your phone number now.
+        1. Answer the automated call from Whitepages
+        2. Follow the voice prompts to confirm removal
+        3. Enter the verification code shown on the Whitepages page
+      Press Enter here once you see a confirmation that your removal was submitted.
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-whitepages-confirmation.png"

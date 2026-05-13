@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "optout"
+version = "0.2.0"
+description = "Self-hosted CLI that automates CCPA/CPRA data-broker opt-out requests via Playwright"
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "gr8p3" }]
+keywords = ["privacy", "ccpa", "cpra", "data-broker", "opt-out", "playwright", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "typer[all]>=0.12",
+    "rich>=13",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "sqlmodel>=0.0.19",
+    "pyyaml>=6",
+    "jinja2>=3",
+    "httpx>=0.27",
+    "playwright>=1.44",
+    "structlog>=23.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Blake104/OptOut"
+Repository = "https://github.com/Blake104/OptOut"
+"Bug Tracker" = "https://github.com/Blake104/OptOut/issues"
+
+[project.scripts]
+optout = "optout.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-PyYAML",
+    "aiosmtpd>=1.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+optout = ["data/brokers/*.yml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+# Playwright, SQLModel, and the engine use heavy Any-based dynamic dispatch.
+# Type-check the schema, config, and CLI where types are well-defined.
+[[tool.mypy.overrides]]
+module = [
+    "optout.engine.*",
+    "optout.scan.*",
+    "optout.monitoring",
+    "optout.db",
+    "optout.cli",
+    "optout.wizard",
+]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

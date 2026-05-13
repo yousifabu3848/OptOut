@@ -1,0 +1,39 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Test / coverage artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# macOS
+.DS_Store
+
+# Secrets / local state — never commit these
+.env
+*.pem
+*.key
+
+# OptOut runtime data — never commit these
+*.db
+browser_profile/
+artifacts/
+logs/
+
+# AI / session artifacts — never commit
+CLAUDE.md
+SESSION_HANDOFF.md
+OPTOUT_TODO.md
+NOTES_PRIVATE.md
+*_HANDOFF.md
+.claude/
+debug_elements.py
+debug_*.py

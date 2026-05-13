@@ -1,0 +1,158 @@
+"""Email-based opt-out handler (SMTP / Gmail OAuth)."""
+
+from __future__ import annotations
+
+import os
+import smtplib
+import ssl
+import uuid
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+from pathlib import Path
+
+import jinja2
+
+from ...brokers.schema import BrokerDef
+from ...config import SmtpConfig, UserConfig, load_config
+from ...db import Submission, artifacts_dir
+from ...utils.statutes import get_statutes
+from .. import SubmissionFailed, SubmissionResult, UserInputRequired
+
+# Jinja2 environment — templates live in src/optout/templates/
+_TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(_TEMPLATES_DIR),
+    autoescape=False,
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+)
+
+
+# ---------------------------------------------------------------------------
+# Public entry point (matches the dispatcher's handler(broker, profile, sub) signature)
+# ---------------------------------------------------------------------------
+
+
+def run(
+    broker: BrokerDef,
+    profile: object,
+    submission: Submission,
+    *,
+    _config: UserConfig | None = None,
+) -> SubmissionResult:
+    """Send an opt-out email for *broker* on behalf of *profile*."""
+    if not broker.opt_out_email:
+        raise SubmissionFailed(
+            f"Broker '{broker.slug}' has no opt_out_email configured. Cannot use the email handler."
+        )
+
+    config = _config or load_config()
+    smtp_cfg = config.email.smtp
+    if smtp_cfg is None:
+        raise SubmissionFailed("No SMTP configuration found. Run `optout init` to configure email.")
+
+    subject = f"Data Deletion Request — {profile.legal_name}"  # type: ignore[attr-defined]
+    body = _render_body(broker, profile)
+    msg = _build_message(
+        from_addr=smtp_cfg.username,
+        to_addr=broker.opt_out_email,
+        subject=subject,
+        body=body,
+        submission_id=submission.id,
+    )
+
+    _send(smtp_cfg, msg)
+
+    artifact_path = _save_eml(submission.id, msg)
+
+    return SubmissionResult(
+        payload={
+            "to": broker.opt_out_email,
+            "from": smtp_cfg.username,
+            "subject": subject,
+            "message_id": msg["Message-ID"],
+        },
+        artifact_path=str(artifact_path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def _render_body(broker: BrokerDef, profile: object) -> str:
+    statutes = get_statutes(broker.legal_basis)
+    template = _env.get_template("opt_out_email.txt.j2")
+    return template.render(broker=broker, profile=profile, statutes=statutes)
+
+
+# ---------------------------------------------------------------------------
+# Message construction
+# ---------------------------------------------------------------------------
+
+
+def _build_message(
+    *,
+    from_addr: str,
+    to_addr: str,
+    subject: str,
+    body: str,
+    submission_id: uuid.UUID,
+) -> EmailMessage:
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=False)
+    msg["Message-ID"] = make_msgid(domain=from_addr.split("@")[-1])
+    msg["X-OptOut-Submission-ID"] = str(submission_id)
+    msg.set_content(body, charset="utf-8")
+    return msg
+
+
+# ---------------------------------------------------------------------------
+# SMTP transport
+# ---------------------------------------------------------------------------
+
+
+def _send(smtp_cfg: SmtpConfig, msg: EmailMessage) -> None:
+    password = os.environ.get(smtp_cfg.password_env, "")
+
+    try:
+        if smtp_cfg.port == 465:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_cfg.host, smtp_cfg.port, context=ctx) as smtp:
+                if password:
+                    smtp.login(smtp_cfg.username, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_cfg.host, smtp_cfg.port) as smtp:
+                smtp.ehlo()
+                if smtp.has_extn("STARTTLS"):
+                    smtp.starttls()
+                    smtp.ehlo()
+                if password and smtp.has_extn("AUTH"):
+                    smtp.login(smtp_cfg.username, password)
+                smtp.send_message(msg)
+    except smtplib.SMTPRecipientsRefused as exc:
+        raise SubmissionFailed(f"SMTP server refused recipient {msg['To']}: {exc}") from exc
+    except smtplib.SMTPAuthenticationError as exc:
+        raise UserInputRequired(
+            f"SMTP authentication failed. Check that {smtp_cfg.password_env!r} "
+            f"is set correctly. Server said: {exc}"
+        ) from exc
+    except (smtplib.SMTPException, OSError) as exc:
+        raise SubmissionFailed(f"SMTP error: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Artifact
+# ---------------------------------------------------------------------------
+
+
+def _save_eml(submission_id: uuid.UUID, msg: EmailMessage) -> Path:
+    path = artifacts_dir() / f"{submission_id}.eml"
+    path.write_bytes(msg.as_bytes())
+    return path

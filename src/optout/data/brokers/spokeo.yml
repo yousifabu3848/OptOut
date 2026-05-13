@@ -1,0 +1,107 @@
+slug: spokeo
+name: Spokeo
+domain: spokeo.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: "https://www.spokeo.com/optout"
+opt_out_email: null
+opt_out_postal_address: null
+
+required_fields: [listing_url, email_current]
+optional_fields: [full_name]
+
+requires_listing_url: true
+requires_phone_verification: false
+requires_email_verification: true
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA, CPRA]
+statutory_response_days: 45
+re_add_window_days: 30
+
+last_verified_at: 2026-05-10
+notes: |
+  Spokeo's opt-out requires:
+  1. The full URL of your Spokeo listing (e.g. https://www.spokeo.com/Jane-Public/TX/Austin/...)
+  2. An email address to receive a verification link.
+
+  After submitting the form, Spokeo sends an email with a confirmation link.
+  You MUST click that link to complete the removal. The `email_verify` step
+  below pauses and prompts you to do this.
+
+  Email verification links expire quickly (usually within 24 hours).
+  Spokeo removes listings within 24–72 hours of confirmed verification.
+
+  Spokeo uses reCAPTCHA v3 (invisible) and occasionally shows a challenge.
+  Run in headed mode so you can intervene if a visible challenge appears.
+
+  Selectors verified against spokeo.com as of 2026-04-15. The opt-out form
+  is a single-page React app; if the selector for the URL input changes,
+  update `fill_form.fields.listing_url.selector` below.
+
+scan:
+  search_url_template: "https://www.spokeo.com/{name_title_slug}/{state_full}"
+  result_selector: "div:has(div.see-results)"
+  match_fields: [full_name, current_address]
+
+steps:
+  - id: find_listing
+    type: search
+    label: "Find your Spokeo listing"
+    search_url_template: "https://www.spokeo.com/{name_title_slug}/{state_full}"
+    result_selector: "[data-testid='person-list']"
+    pick_strategy: prompt_user
+
+  - id: open_optout_form
+    type: navigate
+    label: "Open opt-out form"
+    url: "https://www.spokeo.com/optout"
+
+  - id: wait_for_form
+    type: wait_for
+    label: "Wait for opt-out form"
+    selector: "input[name='url']"
+    timeout_ms: 15000
+
+  - id: solve_captcha
+    type: prompt_user
+    message: >-
+      The Spokeo opt-out form is open in the browser.
+      Please check the "I'm not a robot" reCAPTCHA checkbox now, then press Enter.
+
+  - id: fill_form
+    type: form_fill
+    label: "Fill opt-out form"
+    fields:
+      listing_url:
+        selector: "input[name='url']"
+        value: "{state.found_listing_url}"
+        use_js: true
+      email:
+        selector: "input[name='email']"
+        value: "{profile.emails.current[0]}"
+        use_js: true
+
+  - id: submit
+    type: click
+    label: "Submit opt-out request"
+    selector: "button.responsive-button"
+
+  - id: assert_submit_success
+    type: assert
+    label: "Verify submission accepted"
+    selector: ".confirmation, .success-message, .optout-success"
+    optional: true
+
+  - id: email_verify
+    type: prompt_user
+    message: >-
+      Spokeo has sent a verification email to {profile.emails.current[0]}.
+      Please open that email and click the confirmation link NOW, then press Enter.
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-spokeo-confirmation.png"

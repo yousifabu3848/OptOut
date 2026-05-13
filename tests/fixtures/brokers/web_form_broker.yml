@@ -1,0 +1,65 @@
+slug: test-web-broker
+name: Test Web Broker
+domain: example-web.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: https://example-web.com/opt-out
+opt_out_email: null
+opt_out_postal_address: null
+
+required_fields: [listing_url, full_name]
+optional_fields: [current_address]
+
+requires_listing_url: true
+requires_phone_verification: false
+requires_email_verification: false
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA]
+statutory_response_days: 45
+re_add_window_days: 90
+
+last_verified_at: 2026-01-01
+notes: "Fixture broker for unit tests — not a real broker."
+
+scan:
+  search_url_template: "https://example-web.com/search?name={name_slug}&state={state}"
+  result_selector: ".result-item"
+  match_fields: [full_name, current_address]
+
+steps:
+  - id: find_listing
+    type: search
+    search_url_template: "https://example-web.com/search?name={name_slug}&state={state}"
+    result_selector: ".result-item"
+    pick_strategy: prompt_user
+
+  - id: open_form
+    type: navigate
+    url: https://example-web.com/opt-out
+
+  - id: fill_form
+    type: form_fill
+    fields:
+      listing_url:
+        selector: "input[name='url']"
+        value: "{state.found_listing_url}"
+      reason:
+        selector: "select[name='reason']"
+        value: "privacy"
+
+  - id: handle_captcha
+    type: prompt_user_if_present
+    selector: ".captcha"
+    message: "Please solve the CAPTCHA, then press Enter."
+
+  - id: submit
+    type: click
+    selector: "button[type='submit']"
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-confirmation.png"

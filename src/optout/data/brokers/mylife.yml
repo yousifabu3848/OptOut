@@ -1,0 +1,122 @@
+slug: mylife
+name: MyLife
+domain: mylife.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: "https://www.mylife.com/privacyrequest"
+opt_out_email: "membersupport@mylife.com"
+opt_out_postal_address: null
+
+required_fields: [full_name, current_address, email_current, dob]
+optional_fields: [aliases]
+
+requires_listing_url: false
+requires_phone_verification: false
+requires_email_verification: false
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA, CPRA]
+statutory_response_days: 45
+re_add_window_days: 90
+
+last_verified_at: 2026-05-10
+notes: |
+  Opt-out form at mylife.com/privacyrequest — a JotForm embed (mylife.jotform.com).
+  The /privacy-portal/ route has a broken form action; /optout/ redirects to a 410 Gone.
+
+  The form iframe is at mylife.jotform.com/260284407610047. Engine fills all text
+  fields automatically; user must solve the reCAPTCHA and click Submit manually.
+
+  The form includes a Google reCAPTCHA v2 — no way to automate that step.
+
+  Selectors verified 2026-05-10 (all inside iframe[src*='jotform.com']):
+    First name:  input[id='first_6']
+    Last name:   input[id='last_6']
+    Email:       input[id='input_7']
+    Birth year:  input[id='input_15']
+    Street:      input[id='input_11_addr_line1']
+    City:        input[id='input_11_city']
+    State text:  input[id='input_11_state']
+    ZIP:         input[id='input_11_postal']
+    State select:select[id='input_21']  (full state name, e.g. "Indiana")
+    Submit:      button[type='submit']
+
+  Profiles frequently reappear after 60–90 days.
+
+  Fall back to membersupport@mylife.com with full name, address, and DOB if
+  the web form fails.
+
+scan:
+  search_url_template: "https://www.mylife.com/pub-multisearch.pubview?searchFirstName={name_first}&searchLastName={name_last}&whyReg=peoplesearch"
+  result_selector: "div.hit-profile"
+  match_fields: [full_name, current_address]
+
+steps:
+  - id: open_privacyrequest
+    type: navigate
+    label: "Open MyLife privacy request form"
+    url: "https://www.mylife.com/privacyrequest"
+
+  - id: wait_for_form
+    type: wait_for
+    label: "Wait for form to load"
+    frame: "iframe[src*='jotform.com']"
+    selector: "input[id='first_6']"
+    timeout_ms: 30000
+    message: "Waiting for MyLife JotForm to load…"
+
+  - id: fill_form
+    type: form_fill
+    label: "Fill opt-out form"
+    frame: "iframe[src*='jotform.com']"
+    fields:
+      first_name:
+        selector: "input[id='first_6']"
+        value: "{name_first}"
+      last_name:
+        selector: "input[id='last_6']"
+        value: "{name_last}"
+      email:
+        selector: "input[id='input_7']"
+        value: "{profile.emails.current[0]}"
+      birth_year:
+        selector: "input[id='input_15']"
+        value: "{birth_year}"
+      street:
+        selector: "input[id='input_11_addr_line1']"
+        value: "{profile.current_address.street}"
+      city:
+        selector: "input[id='input_11_city']"
+        value: "{profile.current_address.city}"
+      state_text:
+        selector: "input[id='input_11_state']"
+        value: "{state}"
+      zip:
+        selector: "input[id='input_11_postal']"
+        value: "{profile.current_address.zip}"
+      state_dropdown:
+        selector: "select[id='input_21']"
+        value: "{state_name}"
+
+  - id: captcha_and_submit
+    type: prompt_user_if_present
+    frame: "iframe[src*='jotform.com']"
+    selector: "button[type='submit']"
+    message: >-
+      MyLife's opt-out form is open and pre-filled in the browser.
+      1. Solve the reCAPTCHA checkbox.
+      2. Click Submit.
+      Press Enter here after you see a confirmation message from MyLife.
+
+  - id: assert_submit_success
+    type: assert
+    label: "Verify submission accepted"
+    selector: ".form-thank-you, .thank-you-message, .jotform-form"
+    optional: true
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-mylife-confirmation.png"

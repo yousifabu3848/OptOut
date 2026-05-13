@@ -1,0 +1,192 @@
+slug: beenverified
+name: BeenVerified
+domain: beenverified.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: "https://www.beenverified.com/svc/optout/search/"
+opt_out_email: "privacy@beenverified.com"
+opt_out_postal_address: null
+
+required_fields: [full_name, current_address]
+optional_fields: [dob, email_current]
+
+requires_listing_url: false
+requires_phone_verification: false
+requires_email_verification: true
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA, CPRA]
+statutory_response_days: 45
+re_add_window_days: 60
+
+last_verified_at: 2026-05-10
+notes: |
+  Opt-out form at beenverified.com/svc/optout/search/ (redirected from
+  /app/optout/search). Cloudflare passes automatically with a warmed
+  persistent browser profile.
+
+  State field is a Material UI Select (div-based combobox), not a standard
+  HTML select. Open it by clicking div.MuiSelect-select, then pick the
+  state from li[role='option'].
+
+  Flow (verified 2026-05-10):
+    1. Search results appear → user clicks their profile.
+    2. CAPTCHA appears → user solves it → removal form loads.
+    3. Engine selects "No" for account dropdown, fills all fields, clicks Continue.
+    4. BeenVerified sends a confirmation email — user clicks the link.
+
+  Removal form URL: /svc/optout/search/comprehensive_optouts
+  All text fields are MUI inputs (need use_type: true).
+
+  Selectors verified 2026-05-10:
+    Search first name:  input[name='fname']
+    Search last name:   input[name='ln']
+    Search state:       div.MuiSelect-select (MUI combobox)
+    Search button:      button[aria-label='search-optout-button']
+    Turnstile wait:     input[name='cf-turnstile-response'] value non-empty
+    Account dropdown:   div[aria-labelledby='account_type'] → li[role='option']:text-is("No")
+    Removal first name: input[id='fname']   (use_type: true)
+    Removal last name:  input[id='ln']      (use_type: true)
+    Removal email:      input[id='requestor_email']  (use_type: true)
+    Removal age:        input[id='age']     (use_type: true)
+    Removal street:     input[id='street']  (use_type: true)
+    Removal city:       input[id='city']    (use_type: true)
+    Removal zip:        input[id='zip']     (use_type: true)
+    Continue button:    button[aria-label='continue-button']
+
+  Fall back to privacy@beenverified.com if the web form fails.
+
+steps:
+  - id: open_optout_form
+    type: navigate
+    label: "Open opt-out search form"
+    url: "https://www.beenverified.com/svc/optout/search/"
+
+  - id: fill_name
+    type: form_fill
+    label: "Fill name"
+    fields:
+      first_name:
+        selector: "input[name='fname']"
+        value: "{name_first}"
+      last_name:
+        selector: "input[name='ln']"
+        value: "{name_last}"
+
+  - id: open_state_dropdown
+    type: click
+    label: "Open state selector"
+    selector: "div.MuiSelect-select"
+
+  - id: wait_for_state_listbox
+    type: wait_for
+    label: "Wait for state list"
+    selector: "[role='listbox']"
+    timeout_ms: 5000
+
+  - id: select_state
+    type: click
+    label: "Select state"
+    selector: "[role='listbox'] li:has-text(\"{state}\")"
+
+  - id: wait_for_turnstile
+    type: wait_for
+    label: "Wait for security check"
+    js_condition: "() => { const inp = document.querySelector('input[name=\"cf-turnstile-response\"]'); return !!(inp && inp.value && inp.value.length > 0); }"
+    timeout_ms: 30000
+    message: "Waiting for Cloudflare security check…"
+
+  - id: search
+    type: click
+    label: "Search for listing"
+    selector: "button[aria-label='search-optout-button']"
+
+  - id: select_listing
+    type: prompt_user_if_present
+    selector: "button[aria-label='search-optout-button']"
+    message: >-
+      BeenVerified is showing search results.
+      Click YOUR profile in the list.
+      A CAPTCHA will appear — solve it.
+      Press Enter once the removal form has loaded.
+
+  - id: wait_for_removal_form
+    type: wait_for
+    label: "Wait for removal form"
+    selector: "input[id='requestor_email']"
+    timeout_ms: 120000
+
+  - id: open_account_dropdown
+    type: click
+    label: "Open account type selector"
+    selector: "div[aria-labelledby='account_type']"
+
+  - id: wait_for_account_listbox
+    type: wait_for
+    label: "Wait for account list"
+    selector: "[role='listbox']"
+    timeout_ms: 5000
+
+  - id: select_no_account
+    type: click
+    label: "Select 'No account'"
+    selector: "[role='listbox'] li:has-text(\"No\")"
+
+  - id: fill_removal_form
+    type: form_fill
+    label: "Fill removal form"
+    fields:
+      first_name:
+        selector: "input[id='fname']"
+        value: "{name_first}"
+        use_type: true
+      last_name:
+        selector: "input[id='ln']"
+        value: "{name_last}"
+        use_type: true
+      email:
+        selector: "input[id='requestor_email']"
+        value: "{profile.emails.current[0]}"
+        use_type: true
+      age:
+        selector: "input[id='age']"
+        value: "{age}"
+        use_type: true
+      street:
+        selector: "input[id='street']"
+        value: "{profile.current_address.street}"
+        use_type: true
+      city:
+        selector: "input[id='city']"
+        value: "{profile.current_address.city}"
+        use_type: true
+      zip:
+        selector: "input[id='zip']"
+        value: "{profile.current_address.zip}"
+        use_type: true
+
+  - id: submit_removal
+    type: click
+    label: "Submit removal request"
+    selector: "button[aria-label='continue-button']"
+
+  - id: assert_submit_success
+    type: assert
+    label: "Verify removal request submitted"
+    selector: ".confirmation, [class*='success'], [class*='confirm'], input[id='requestor_email']"
+    optional: true
+
+  - id: email_verify
+    type: prompt_user_if_present
+    selector: "input[id='requestor_email'], .confirmation, [class*='success'], [class*='confirm']"
+    message: >-
+      BeenVerified may have sent a confirmation email to {profile.emails.current[0]}.
+      If so, open it and click the confirmation link, then press Enter.
+      If you see a confirmation message on screen already, just press Enter.
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-beenverified-confirmation.png"

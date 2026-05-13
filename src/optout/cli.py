@@ -1,0 +1,1168 @@
+"""Top-level Typer app and all subcommands."""
+
+from __future__ import annotations
+
+from datetime import UTC
+
+import typer
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+app = typer.Typer(name="optout", no_args_is_help=True)
+brokers_app = typer.Typer(help="Browse and inspect broker definitions.")
+app.add_typer(brokers_app, name="brokers")
+
+console = Console()
+
+
+@app.callback()
+def _main(ctx: typer.Context) -> None:
+    """Self-hosted data broker opt-out tool."""
+    if ctx.invoked_subcommand is not None:
+        console.print("\n[bold]OptOut[/bold]  [dim]·  self-hosted data-broker opt-out[/dim]\n")
+
+
+# ---------------------------------------------------------------------------
+# optout init
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def init() -> None:
+    """Interactive wizard — creates ~/.config/optout/config.yml."""
+    from .wizard import run_init_wizard
+
+    run_init_wizard()
+
+
+# ---------------------------------------------------------------------------
+# Display helpers (brokers)
+# ---------------------------------------------------------------------------
+
+
+def _method_style(method: str) -> str:
+    return {"web_form": "blue", "email": "green", "postal": "yellow", "manual": "dim"}.get(
+        method, "white"
+    )
+
+
+def _bool_icon(val: bool) -> str:
+    return "[green]✓[/green]" if val else "[dim]✗[/dim]"
+
+
+def _status_style(status: str) -> str:
+    return {
+        "queued": "dim",
+        "awaiting_user_input": "yellow",
+        "submitted": "cyan",
+        "awaiting_broker_confirmation": "cyan",
+        "confirmed": "green",
+        "rejected": "red",
+        "expired": "dim",
+        "failed": "red",
+    }.get(status, "white")
+
+
+_STATUS_LABEL: dict[str, str] = {
+    "queued": "Queued",
+    "awaiting_user_input": "⚡ Needs input",
+    "submitted": "Submitted",
+    "awaiting_broker_confirmation": "Submitted ✓",
+    "confirmed": "Removed ✓",
+    "rejected": "Rejected",
+    "expired": "Expired",
+    "failed": "Failed",
+}
+
+
+def _status_label(status: str) -> str:
+    return _STATUS_LABEL.get(status, status)
+
+
+def _fmt_date(dt) -> str:
+    if dt is None:
+        return "—"
+    d = dt.date() if hasattr(dt, "date") else dt
+    return d.strftime("%b %d").replace(" 0", "  ")  # "May 10", "Jun  4"
+
+
+# ---------------------------------------------------------------------------
+# optout brokers list / info
+# ---------------------------------------------------------------------------
+
+
+@brokers_app.command("list")
+def brokers_list(
+    category: str | None = typer.Option(None, "--category", "-c", help="Filter by category."),
+) -> None:
+    """Show all known brokers."""
+    from .brokers.registry import all_brokers
+
+    brokers = all_brokers()
+    if category:
+        brokers = [b for b in brokers if b.category == category]
+
+    if not brokers:
+        msg = (
+            f"No brokers found in category '{category}'."
+            if category
+            else "No broker definitions found. Add YAML files to the brokers/ directory."
+        )
+        console.print(f"[yellow]{msg}[/yellow]")
+        raise typer.Exit(code=0)
+
+    table = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD)
+    table.add_column("Name", style="bold", min_width=16)
+    table.add_column("Slug", style="dim")
+    table.add_column("Category")
+    table.add_column("Method", min_width=8)
+    table.add_column("Legal Basis")
+    table.add_column("Days", justify="right")
+    table.add_column("Last Verified")
+
+    for b in brokers:
+        ms = _method_style(b.method)
+        table.add_row(
+            b.name,
+            b.slug,
+            b.category,
+            f"[{ms}]{b.method}[/{ms}]",
+            ", ".join(b.legal_basis),
+            str(b.statutory_response_days),
+            str(b.last_verified_at or "—"),
+        )
+
+    console.print(table)
+    console.print(f"[dim]{len(brokers)} broker(s) listed.[/dim]")
+
+
+@brokers_app.command("info")
+def brokers_info(
+    slug: str = typer.Argument(..., help="Broker slug (e.g. whitepages)."),
+) -> None:
+    """Show a broker's definition and your submission status with it."""
+    from .brokers.registry import get_broker
+    from .db import db_path, get_session, list_submissions
+
+    try:
+        broker = get_broker(slug)
+    except KeyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    # ── Overview panel ────────────────────────────────────────────────────
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(style="dim", justify="right")
+    grid.add_column()
+
+    ms = _method_style(broker.method)
+    rows: list[tuple[str, str]] = [
+        ("Slug:", broker.slug),
+        ("Domain:", broker.domain),
+        ("Category:", broker.category),
+        ("Method:", f"[{ms}]{broker.method}[/{ms}]"),
+    ]
+    if broker.opt_out_url:
+        rows.append(("Opt-out URL:", broker.opt_out_url))
+    if broker.opt_out_email:
+        rows.append(("Opt-out email:", broker.opt_out_email))
+    if broker.opt_out_postal_address:
+        rows.append(("Postal address:", broker.opt_out_postal_address))
+    if broker.parent_company:
+        rows.append(("Parent company:", broker.parent_company))
+    rows += [
+        ("Legal basis:", ", ".join(broker.legal_basis)),
+        ("Statutory response:", f"{broker.statutory_response_days} days"),
+        (
+            "Re-add window:",
+            f"{broker.re_add_window_days} days" if broker.re_add_window_days else "—",
+        ),
+        ("Last verified:", str(broker.last_verified_at or "unknown")),
+    ]
+    for label, value in rows:
+        grid.add_row(label, value)
+
+    console.print(Panel(grid, title=f"[bold]{broker.name}[/bold]", expand=False))
+
+    # ── Requirements ──────────────────────────────────────────────────────
+    console.print("\n[bold]Requirements[/bold]")
+    reqs = [
+        ("Listing URL", broker.requires_listing_url),
+        ("Phone verification", broker.requires_phone_verification),
+        ("Email verification", broker.requires_email_verification),
+        ("ID upload", broker.requires_id_upload),
+        ("Notarization", broker.requires_notarization),
+    ]
+    for label, val in reqs:
+        console.print(f"  {_bool_icon(val)} {label}")
+
+    if broker.required_fields:
+        console.print(f"  [dim]Required fields:[/dim] {', '.join(broker.required_fields)}")
+    if broker.optional_fields:
+        console.print(f"  [dim]Optional fields:[/dim] {', '.join(broker.optional_fields)}")
+
+    # ── Notes ─────────────────────────────────────────────────────────────
+    if broker.notes:
+        console.print("\n[bold]Notes[/bold]")
+        for line in broker.notes.strip().splitlines():
+            console.print(f"  [dim]{line}[/dim]")
+
+    # ── Steps (web_form only) ─────────────────────────────────────────────
+    if broker.steps:
+        console.print(f"\n[bold]Steps ({len(broker.steps)})[/bold]")
+        steps_table = Table(show_header=True, header_style="bold", box=box.SIMPLE)
+        steps_table.add_column("#", justify="right", style="dim", width=3)
+        steps_table.add_column("ID")
+        steps_table.add_column("Type", style="cyan")
+        for i, step in enumerate(broker.steps, 1):
+            steps_table.add_row(str(i), step.id, step.type)
+        console.print(steps_table)
+
+    # ── Submission status ─────────────────────────────────────────────────
+    console.print("\n[bold]Your submissions[/bold]")
+    if not db_path().exists():
+        console.print("  [dim]Database not initialised — run [bold]optout init[/bold] first.[/dim]")
+        return
+
+    with get_session() as session:
+        subs = list_submissions(session, broker_slug=slug)
+
+    if not subs:
+        console.print(
+            f"  [dim]No submissions yet. Run [bold]optout submit --broker {slug}[/bold].[/dim]"
+        )
+        return
+
+    sub_table = Table(show_header=True, header_style="bold", box=box.SIMPLE)
+    sub_table.add_column("ID", style="dim", max_width=12)
+    sub_table.add_column("Status")
+    sub_table.add_column("Submitted")
+    sub_table.add_column("Deadline")
+    for s in subs:
+        ss = _status_style(s.status)
+        sub_table.add_row(
+            str(s.id)[:8] + "…",
+            f"[{ss}]{s.status}[/{ss}]",
+            str(s.submitted_at.date()) if s.submitted_at else "—",
+            str(s.deadline_at.date()) if s.deadline_at else "—",
+        )
+    console.print(sub_table)
+
+
+# ---------------------------------------------------------------------------
+# optout scan
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def scan(
+    broker: str | None = typer.Option(None, "--broker", "-b", help="Limit to one broker slug."),
+) -> None:
+    """Check which brokers currently list you (no submissions made)."""
+    import json as _json
+
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    from .brokers.registry import all_brokers, get_broker
+    from .config import load_config
+    from .db import get_session, init_db, record_scan
+    from .scan.scanner import scan_broker
+    from .wizard import assert_own_identity
+
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    assert_own_identity(config.profile.legal_name)
+    init_db()
+
+    try:
+        targets = [get_broker(broker)] if broker else all_brokers()
+    except KeyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    no_scan_cfg = [b for b in targets if not b.scan]
+    scannable = [b for b in targets if b.scan]
+
+    if no_scan_cfg:
+        console.print(
+            f"[dim]{len(no_scan_cfg)} broker(s) have no scan config and will be skipped: "
+            f"{', '.join(b.slug for b in no_scan_cfg)}[/dim]\n"
+        )
+
+    if not scannable:
+        console.print("[yellow]No brokers with scan config found.[/yellow]")
+        raise typer.Exit(code=0)
+
+    table = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD)
+    table.add_column("Broker", style="bold", min_width=16)
+    table.add_column("Result", min_width=14)
+    table.add_column("Matches", justify="right")
+    table.add_column("Detail", style="dim", no_wrap=False)
+
+    found_count = clean_count = inconclusive_count = 0
+
+    for b in scannable:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn(f"Scanning [bold]{b.name}[/bold]…"),
+            transient=True,
+            console=console,
+        ) as progress:
+            progress.add_task("", total=None)
+            outcome = scan_broker(
+                b,
+                config.profile,
+                headless=config.playwright.headless,
+                slow_mo_ms=config.playwright.slow_mo_ms,
+            )
+
+        with get_session() as session:
+            record_scan(
+                session,
+                b.slug,
+                outcome.result,
+                matches_json=(
+                    _json.dumps([{"text": m.text, "url": m.url} for m in outcome.matches])
+                    if outcome.matches
+                    else None
+                ),
+            )
+
+        if outcome.result == "found":
+            result_cell = "[red bold]FOUND[/red bold]"
+            found_count += 1
+        elif outcome.result == "clean":
+            result_cell = "[green]clean[/green]"
+            clean_count += 1
+        else:
+            result_cell = "[yellow]inconclusive[/yellow]"
+            inconclusive_count += 1
+
+        if outcome.matches:
+            snippet = outcome.matches[0].text[:70].replace("\n", " ")
+            detail = snippet + ("…" if len(outcome.matches[0].text) > 70 else "")
+        else:
+            detail = outcome.error or ""
+
+        table.add_row(b.name, result_cell, str(len(outcome.matches)), detail)
+
+    console.print(table)
+
+    parts: list[str] = []
+    if found_count:
+        parts.append(f"[red bold]{found_count} found[/red bold]")
+    if clean_count:
+        parts.append(f"[green]{clean_count} clean[/green]")
+    if inconclusive_count:
+        parts.append(f"[yellow]{inconclusive_count} inconclusive[/yellow]")
+    console.print("  " + "  ·  ".join(parts))
+
+    if found_count:
+        console.print(
+            f"\n  [red bold]⚠[/red bold]  Your data was found on {found_count} broker(s).\n"
+            "     Run [cyan]optout queue[/cyan] and [cyan]optout submit[/cyan] to request removal."
+        )
+        console.print(
+            "\n  [yellow bold]ℹ[/yellow bold]  [yellow]Scan matches by name only"
+            " — results may include other people\n"
+            "     with the same name. Check the Detail column"
+            " before submitting.[/yellow]"
+        )
+
+
+# ---------------------------------------------------------------------------
+# optout queue
+# ---------------------------------------------------------------------------
+
+_ACTIVE_STATUSES = frozenset(
+    {
+        "queued",
+        "awaiting_user_input",
+        "submitted",
+        "awaiting_broker_confirmation",
+    }
+)
+
+
+@app.command()
+def queue(
+    broker: str | None = typer.Option(None, "--broker", "-b", help="Broker slug to queue."),
+) -> None:
+    """Add brokers to the submission queue."""
+    from .brokers.registry import all_brokers, get_broker
+    from .config import load_config
+    from .db import create_submission, get_session, init_db, list_submissions
+    from .wizard import assert_own_identity
+
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    assert_own_identity(config.profile.legal_name)
+    init_db()
+
+    try:
+        brokers_to_queue = [get_broker(broker)] if broker else all_brokers()
+    except KeyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if not brokers_to_queue:
+        console.print(
+            "[yellow]No brokers found. Add YAML files to the brokers/ directory.[/yellow]"
+        )
+        raise typer.Exit(code=0)
+
+    queued = skipped = 0
+    with get_session() as session:
+        for b in brokers_to_queue:
+            existing = list_submissions(session, broker_slug=b.slug)
+            if any(s.status in _ACTIVE_STATUSES for s in existing):
+                console.print(f"  [dim]Skip {b.name} — active submission already exists.[/dim]")
+                skipped += 1
+                continue
+
+            create_submission(
+                session,
+                broker_slug=b.slug,
+                method_used=b.method,
+                legal_basis_cited=b.legal_basis,
+                statutory_response_days=b.statutory_response_days,
+            )
+            ms = _method_style(b.method)
+            console.print(f"  [green]Queued:[/green] {b.name}  [{ms}]{b.method}[/{ms}]")
+            queued += 1
+
+    console.print(f"\n[bold]{queued}[/bold] broker(s) queued, {skipped} skipped.")
+    if queued:
+        console.print("Run [cyan]optout submit[/cyan] to process the queue.")
+
+
+# ---------------------------------------------------------------------------
+# optout submit
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def submit(
+    broker: str | None = typer.Option(None, "--broker", "-b", help="Limit to one broker slug."),
+    slow: bool = typer.Option(
+        False, "--slow", help="Add 600ms delay between browser actions so you can follow along."
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show debug logs (selectors, timing) in the terminal."
+    ),
+) -> None:
+    """Process queued opt-out submissions."""
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    from .brokers.registry import get_broker
+    from .config import load_config
+    from .db import get_session, init_db, list_submissions
+    from .engine.dispatcher import run_submission
+    from .logging import configure_logging
+    from .wizard import assert_own_identity
+
+    configure_logging(verbose=verbose)
+
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if slow:
+        config.playwright.slow_mo_ms = 600
+
+    assert_own_identity(config.profile.legal_name)
+    init_db()
+
+    with get_session() as session:
+        subs = list_submissions(
+            session, broker_slug=broker, status=["queued", "awaiting_user_input"]
+        )
+
+        if not subs:
+            console.print("[yellow]No queued submissions found.[/yellow]")
+            hint = f"--broker {broker}" if broker else ""
+            console.print(f"  Run: [bold]optout queue {hint}[/bold]".rstrip())
+            raise typer.Exit(code=0)
+
+        console.print(f"\nProcessing [bold]{len(subs)}[/bold] queued submission(s)…\n")
+
+        succeeded = failed = needs_input = 0
+        for sub in subs:
+            try:
+                broker_def = get_broker(sub.broker_slug)
+            except KeyError:
+                console.print(f"  [red]Unknown broker slug '{sub.broker_slug}' — skipping.[/red]")
+                failed += 1
+                continue
+
+            ms = _method_style(broker_def.method)
+            retry_tag = "  [yellow](retry)[/yellow]" if sub.status == "awaiting_user_input" else ""
+            console.print(
+                f"[bold]{broker_def.name}[/bold]  [{ms}]{broker_def.method}[/{ms}]{retry_tag}"
+            )
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("{task.description}"),
+                transient=True,
+                console=console,
+            ) as progress:
+                task = progress.add_task("Submitting…", total=None)
+                run_submission(session, sub, broker_def, config.profile, config)
+                progress.update(task, completed=True)
+
+            ss = _status_style(sub.status)
+            console.print(f"  Status: [{ss}]{_status_label(sub.status)}[/{ss}]")
+            if sub.failure_reason:
+                console.print(f"  [dim]{sub.failure_reason}[/dim]")
+            if sub.artifact_path:
+                console.print(f"  [dim]Artifact: {sub.artifact_path}[/dim]")
+            console.print()
+
+            if sub.status == "awaiting_broker_confirmation":
+                succeeded += 1
+            elif sub.status == "awaiting_user_input":
+                needs_input += 1
+            else:
+                failed += 1
+
+    parts = []
+    if succeeded:
+        parts.append(f"[green]{succeeded} submitted[/green]")
+    if needs_input:
+        parts.append(f"[yellow]{needs_input} need user input[/yellow]")
+    if failed:
+        parts.append(f"[red]{failed} failed[/red]")
+    console.print("Summary: " + ", ".join(parts))
+    console.print("Run [cyan]optout status[/cyan] to see the full picture.")
+
+
+# ---------------------------------------------------------------------------
+# Display helpers (status command)
+# ---------------------------------------------------------------------------
+
+_TERMINAL_STATUSES = frozenset({"confirmed", "rejected", "failed", "expired"})
+
+
+def _days_left_cell(submission) -> str:
+    """Return a Rich-markup string for the Days Left column."""
+    from datetime import datetime
+
+    if submission.status == "confirmed":
+        return "[green]✓[/green]"
+    if submission.status in _TERMINAL_STATUSES:
+        return "—"
+    if submission.deadline_at is None:
+        return "—"
+
+    now = datetime.now(UTC)
+    # SQLite stores datetimes as naive strings; ensure we compare correctly
+    dl = submission.deadline_at
+    if dl.tzinfo is None:
+        dl = dl.replace(tzinfo=UTC)
+    days = (dl - now).days
+
+    if days < 0:
+        return "[red bold]OVERDUE[/red bold]"
+    if days < 7:
+        return f"[red]{days}[/red]"
+    if days < 14:
+        return f"[yellow]{days}[/yellow]"
+    return f"[green]{days}[/green]"
+
+
+def _deadline_cell(submission) -> str:
+    if submission.deadline_at is None:
+        return "—"
+    dl = submission.deadline_at
+    date_str = dl.date() if hasattr(dl, "date") else str(dl)[:10]
+    return str(date_str)
+
+
+# ---------------------------------------------------------------------------
+# optout status
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def status(
+    broker: str | None = typer.Option(None, "--broker", "-b", help="Filter by broker slug."),
+    filter_status: str | None = typer.Option(
+        None, "--status", "-s", help="Filter by status value."
+    ),
+) -> None:
+    """Show submission statuses, deadlines, and confirmations."""
+    from collections import Counter
+
+    from .brokers.registry import load_registry
+    from .db import db_path, get_session, list_submissions
+
+    if not db_path().exists():
+        console.print("[yellow]No database found.[/yellow] Run [bold]optout init[/bold] first.")
+        raise typer.Exit(code=0)
+
+    # Load registry for name lookup — best-effort, fall back to slug
+    try:
+        load_registry()
+        from .brokers.registry import get_broker as _get_broker
+    except Exception:
+        _get_broker = None  # type: ignore[assignment]
+
+    with get_session() as session:
+        subs = list_submissions(session, broker_slug=broker, status=filter_status)
+
+    if not subs:
+        parts = []
+        if broker:
+            parts.append(f"broker '{broker}'")
+        if filter_status:
+            parts.append(f"status '{filter_status}'")
+        qualifier = " for " + " and ".join(parts) if parts else ""
+        console.print(f"[yellow]No submissions found{qualifier}.[/yellow]")
+        console.print("Run [cyan]optout queue[/cyan] to add brokers to the queue.")
+        raise typer.Exit(code=0)
+
+    # ── Build table ───────────────────────────────────────────────────────
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        box=box.SIMPLE_HEAD,
+        show_lines=False,
+    )
+    table.add_column("Broker", style="bold", min_width=16)
+    table.add_column("Status", min_width=16)
+    table.add_column("Submitted", min_width=8)
+    table.add_column("Deadline", min_width=8)
+    table.add_column("Days Left", justify="right")
+
+    counts: Counter[str] = Counter()
+    overdue_slugs: list[str] = []
+    needs_input_slugs: list[str] = []
+    failure_rows: list[tuple[str, str]] = []
+
+    for sub in sorted(subs, key=lambda s: s.created_at):
+        # Broker name / method
+        broker_name = sub.broker_slug
+        if _get_broker is not None:
+            try:
+                b = _get_broker(sub.broker_slug)
+                broker_name = b.name
+            except KeyError:
+                pass
+
+        ss = _status_style(sub.status)
+        days_cell = _days_left_cell(sub)
+
+        table.add_row(
+            broker_name,
+            f"[{ss}]{_status_label(sub.status)}[/{ss}]",
+            _fmt_date(sub.submitted_at),
+            _fmt_date(sub.deadline_at),
+            days_cell,
+        )
+
+        counts[sub.status] += 1
+
+        if "OVERDUE" in days_cell:
+            overdue_slugs.append(broker_name)
+        if sub.status == "awaiting_user_input":
+            needs_input_slugs.append(broker_name)
+        if sub.status == "failed" and sub.failure_reason:
+            failure_rows.append((broker_name, sub.failure_reason))
+
+    console.print(table)
+
+    # ── Summary line ──────────────────────────────────────────────────────
+    summary_parts: list[str] = []
+    for st, count in sorted(counts.items()):
+        style = _status_style(st)
+        summary_parts.append(f"[{style}]{count} {_status_label(st)}[/{style}]")
+    console.print("  " + "  ·  ".join(summary_parts))
+
+    # ── Callouts ──────────────────────────────────────────────────────────
+    if overdue_slugs:
+        console.print(
+            f"\n  [red bold]⚠[/red bold]  "
+            f"{len(overdue_slugs)} submission(s) past their statutory deadline "
+            f"({', '.join(overdue_slugs)}).\n"
+            f"     Consider filing a complaint at [link=https://cppa.ca.gov]cppa.ca.gov[/link] "
+            f"or contacting your state attorney general."
+        )
+    if needs_input_slugs:
+        console.print(
+            f"\n  [yellow bold]⚠[/yellow bold]  "
+            f"{len(needs_input_slugs)} submission(s) need your attention "
+            f"({', '.join(needs_input_slugs)}).\n"
+            f"     Run [cyan]optout submit[/cyan] to retry."
+        )
+    if failure_rows:
+        console.print("\n  [bold]Failure details:[/bold]")
+        for name, reason in failure_rows:
+            console.print(f"    [dim]{name}:[/dim] {reason}")
+
+
+# ---------------------------------------------------------------------------
+# optout monitor
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def monitor() -> None:
+    """One-shot re-scan; safe to cron."""
+    from .config import load_config
+    from .monitoring import run_monitor
+    from .wizard import assert_own_identity
+
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    assert_own_identity(config.profile.legal_name)
+
+    console.print("[bold]Running monitor scan…[/bold]\n")
+    summary = run_monitor(config)
+
+    table = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD)
+    table.add_column("Broker", style="bold", min_width=16)
+    table.add_column("Result", min_width=14)
+    table.add_column("Re-queued", justify="center")
+
+    for report in summary.reports:
+        if report.result == "skipped":
+            result_cell = f"[dim]skipped — {report.skipped_reason}[/dim]"
+        elif report.result == "found":
+            result_cell = "[red bold]FOUND[/red bold]"
+        elif report.result == "clean":
+            result_cell = "[green]clean[/green]"
+        else:
+            result_cell = "[yellow]inconclusive[/yellow]"
+
+        requeued_cell = "[green]✓[/green]" if report.requeued else ""
+        table.add_row(report.name, result_cell, requeued_cell)
+
+    console.print(table)
+
+    parts: list[str] = []
+    if summary.scanned:
+        parts.append(f"[bold]{summary.scanned}[/bold] scanned")
+    if summary.found:
+        parts.append(f"[red]{summary.found} found[/red]")
+    if summary.clean:
+        parts.append(f"[green]{summary.clean} clean[/green]")
+    if summary.inconclusive:
+        parts.append(f"[yellow]{summary.inconclusive} inconclusive[/yellow]")
+    if summary.requeued:
+        parts.append(f"[cyan]{summary.requeued} re-queued[/cyan]")
+    console.print("  " + "  ·  ".join(parts))
+
+    if summary.requeued:
+        console.print(
+            f"\n  [cyan]→[/cyan]  {summary.requeued} broker(s) re-queued for resubmission.\n"
+            "     Run [cyan]optout submit[/cyan] to process them."
+        )
+
+
+# ---------------------------------------------------------------------------
+# optout doctor
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def doctor() -> None:
+    """Run diagnostic checks and report any setup problems."""
+    import sys
+    from dataclasses import dataclass
+    from pathlib import Path
+    from typing import Literal
+
+    @dataclass
+    class Check:
+        name: str
+        status: Literal["pass", "warn", "fail"]
+        detail: str = ""
+        hint: str = ""
+
+    results: list[Check] = []
+
+    # ── 1. Python version ────────────────────────────────────────────────────
+    vi = sys.version_info
+    vs = f"{vi.major}.{vi.minor}.{vi.micro}"
+    if vi >= (3, 12):
+        results.append(Check("Python ≥ 3.12", "pass", vs))
+    else:
+        results.append(
+            Check(
+                "Python ≥ 3.12",
+                "fail",
+                vs,
+                "Install Python 3.12+ — see python.org or use pyenv.",
+            )
+        )
+
+    # ── 2. Playwright + Chromium ─────────────────────────────────────────────
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            exe = pw.chromium.executable_path
+        if Path(exe).exists():
+            results.append(Check("Playwright / Chromium", "pass", exe))
+        else:
+            results.append(
+                Check(
+                    "Playwright / Chromium",
+                    "fail",
+                    f"Not found at {exe}",
+                    "Run: playwright install chromium",
+                )
+            )
+    except Exception as exc:
+        results.append(
+            Check(
+                "Playwright / Chromium",
+                "fail",
+                str(exc),
+                "Run: playwright install chromium",
+            )
+        )
+
+    # ── 3. Config file ───────────────────────────────────────────────────────
+    from .config import config_path
+
+    _cp = config_path()
+    try:
+        from .config import load_config
+
+        load_config()
+        results.append(Check("Config file", "pass", str(_cp)))
+    except FileNotFoundError:
+        results.append(
+            Check(
+                "Config file",
+                "fail",
+                f"Not found: {_cp}",
+                "Run: optout init",
+            )
+        )
+    except Exception as exc:
+        results.append(
+            Check(
+                "Config file",
+                "fail",
+                str(exc)[:80],
+                "Run: optout init",
+            )
+        )
+
+    # ── 4. Database schema ───────────────────────────────────────────────────
+    from .db import db_path as _db_path
+
+    _dp = _db_path()
+    try:
+        if not _dp.exists():
+            results.append(
+                Check(
+                    "Database",
+                    "warn",
+                    f"Not yet created — {_dp}",
+                    "Run: optout queue  (the DB is created automatically)",
+                )
+            )
+        else:
+            from sqlmodel import Session, select
+
+            from .db import Submission, get_engine
+
+            _eng = get_engine(_dp)
+            with Session(_eng) as _s:
+                _s.exec(select(Submission).limit(1))
+            results.append(Check("Database schema", "pass", str(_dp)))
+    except Exception as exc:
+        results.append(
+            Check(
+                "Database schema",
+                "fail",
+                str(exc)[:80],
+                f"Schema may be stale. Delete {_dp} and run: optout queue",
+            )
+        )
+
+    # ── 5. Browser profile dir ───────────────────────────────────────────────
+    from .config import config_dir
+
+    _pd = config_dir() / "browser_profile"
+    try:
+        _pd.mkdir(parents=True, exist_ok=True)
+        _probe = _pd / ".doctor_probe"
+        _probe.write_text("ok")
+        _probe.unlink()
+        results.append(Check("Browser profile dir", "pass", str(_pd)))
+    except Exception as exc:
+        results.append(
+            Check(
+                "Browser profile dir",
+                "fail",
+                str(exc),
+                f"Check permissions on {_pd}",
+            )
+        )
+
+    # ── 6. Artifacts dir ─────────────────────────────────────────────────────
+    from .db import artifacts_dir as _artifacts_dir
+
+    _ad = _artifacts_dir()
+    try:
+        _probe2 = _ad / ".doctor_probe"
+        _probe2.write_text("ok")
+        _probe2.unlink()
+        results.append(Check("Artifacts dir", "pass", str(_ad)))
+    except Exception as exc:
+        results.append(
+            Check(
+                "Artifacts dir",
+                "fail",
+                str(exc),
+                f"Check permissions on {_ad}",
+            )
+        )
+
+    # ── 7. Broker YAMLs ──────────────────────────────────────────────────────
+    from .brokers.loader import load_broker
+    from .brokers.registry import _brokers_dir
+
+    _bd = _brokers_dir()
+    try:
+        _yamls = sorted(_bd.glob("*.yml"))
+        _errors: list[str] = []
+        for _ypath in _yamls:
+            try:
+                load_broker(_ypath)
+            except Exception as exc:
+                _errors.append(f"{_ypath.stem}: {exc}")
+        _n = len(_yamls)
+        if _n == 0:
+            results.append(Check("Broker YAMLs", "warn", f"No YAMLs found in {_bd}"))
+        elif _errors:
+            results.append(
+                Check(
+                    f"Broker YAMLs ({_n})",
+                    "fail",
+                    "; ".join(_errors),
+                )
+            )
+        else:
+            results.append(Check(f"Broker YAMLs ({_n})", "pass", "all valid"))
+    except Exception as exc:
+        results.append(Check("Broker YAMLs", "fail", str(exc)))
+
+    # ── 8. Network reachability ───────────────────────────────────────────────
+    try:
+        import httpx
+
+        from .brokers.registry import all_brokers
+
+        _net_brokers = [b for b in all_brokers() if b.opt_out_url]
+        console.print(
+            f"  [dim]Checking network reachability for {len(_net_brokers)} broker(s)…[/dim]"
+        )
+        for _nb in _net_brokers:
+            try:
+                _r = httpx.head(
+                    _nb.opt_out_url,
+                    timeout=5,
+                    follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible)"},
+                )
+                if _r.status_code < 500:
+                    results.append(Check(f"{_nb.name} reachable", "pass", f"HTTP {_r.status_code}"))
+                else:
+                    results.append(
+                        Check(
+                            f"{_nb.name} reachable",
+                            "warn",
+                            f"HTTP {_r.status_code}",
+                            "Site returned server error — check manually.",
+                        )
+                    )
+            except Exception as exc:
+                results.append(
+                    Check(
+                        f"{_nb.name} reachable",
+                        "warn",
+                        str(exc)[:60],
+                        "Network or DNS issue — check your connection.",
+                    )
+                )
+    except Exception:
+        pass
+
+    # ── Render results ────────────────────────────────────────────────────────
+    _ICON = {
+        "pass": "[green]✅[/green]",
+        "warn": "[yellow]⚠️ [/yellow]",
+        "fail": "[red]❌[/red]",
+    }
+
+    tbl = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold", padding=(0, 1))
+    tbl.add_column("", width=4, no_wrap=True)
+    tbl.add_column("Check", style="bold", min_width=28)
+    tbl.add_column("Detail", overflow="fold")
+
+    for _res in results:
+        _detail_markup = f"[dim]{_res.detail}[/dim]" if _res.detail else ""
+        tbl.add_row(_ICON[_res.status], _res.name, _detail_markup)
+
+    console.print()
+    console.print(tbl)
+
+    _hints = [(r.name, r.hint) for r in results if r.hint and r.status != "pass"]
+    if _hints:
+        console.print("[bold]Remediation:[/bold]")
+        for _hname, _hint in _hints:
+            console.print(f"  [dim]{_hname}[/dim]  →  {_hint}")
+        console.print()
+
+    _any_fail = any(r.status == "fail" for r in results)
+    _any_warn = any(r.status == "warn" for r in results)
+
+    if _any_fail:
+        console.print("[red bold]Some checks failed — see remediation hints above.[/red bold]")
+        raise typer.Exit(code=1)
+    elif _any_warn:
+        console.print("[yellow]All critical checks passed (see warnings above).[/yellow]")
+    else:
+        console.print("[green bold]All checks passed.[/green bold]")
+
+
+# ---------------------------------------------------------------------------
+# optout verify
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def verify(
+    broker: str | None = typer.Option(None, "--broker", "-b", help="Limit to one broker slug."),
+    update: bool = typer.Option(
+        False, "--update", help="Write today's date to last_verified_at on passing brokers."
+    ),
+    headed: bool = typer.Option(
+        False, "--headed", help="Show the browser window (default: headless)."
+    ),
+) -> None:
+    """Check whether broker form selectors still exist on live pages."""
+    from rich import box
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
+
+    from .brokers.registry import _brokers_dir, all_brokers, get_broker
+    from .verify import BrokerVerifyResult, update_last_verified_at, verify_broker
+
+    try:
+        targets = [get_broker(broker)] if broker else all_brokers()
+    except KeyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    targets = [b for b in targets if b.opt_out_url]
+    if not targets:
+        console.print("[yellow]No brokers with opt_out_url found.[/yellow]")
+        raise typer.Exit(code=0)
+
+    _ICON = {"pass": "[green]✅[/green]", "warn": "[yellow]⚠️ [/yellow]", "fail": "[red]❌[/red]"}
+
+    results: list[BrokerVerifyResult] = []
+    for b in targets:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn(f"Checking [bold]{b.name}[/bold]…"),
+            transient=True,
+            console=console,
+        ) as progress:
+            progress.add_task("", total=None)
+            res = verify_broker(b, headless=not headed)
+        results.append(res)
+
+        # Update last_verified_at if requested and broker passed
+        if update and res.status == "pass":
+            yaml_path = _brokers_dir() / f"{b.slug}.yml"
+            if yaml_path.exists():
+                update_last_verified_at(yaml_path)
+                console.print(f"  [dim]Updated last_verified_at for {b.slug}[/dim]")
+
+    # ── Per-broker table ──────────────────────────────────────────────────
+    tbl = Table(show_header=True, header_style="bold", box=box.SIMPLE_HEAD)
+    tbl.add_column("", width=4, no_wrap=True)
+    tbl.add_column("Broker", style="bold", min_width=16)
+    tbl.add_column("Selectors", justify="right")
+    tbl.add_column("Missing", justify="right")
+    tbl.add_column("Detail", style="dim", overflow="fold")
+
+    for res in results:
+        total = len(res.selectors)
+        missing_list = [c for c in res.selectors if not c.found]
+        missing_count = len(missing_list)
+        detail = res.error or (
+            ", ".join(c.step_id for c in missing_list[:3]) + ("…" if len(missing_list) > 3 else "")
+            if missing_list
+            else "all found"
+        )
+        tbl.add_row(
+            _ICON[res.status],
+            res.name,
+            str(total),
+            str(missing_count) if missing_count else "",
+            detail,
+        )
+
+    console.print()
+    console.print(tbl)
+
+    # ── Missing selector detail ───────────────────────────────────────────
+    drift_brokers = [r for r in results if r.selectors and any(not c.found for c in r.selectors)]
+    if drift_brokers:
+        console.print("[bold]Missing selectors:[/bold]")
+        for res in drift_brokers:
+            console.print(f"  [bold]{res.name}[/bold]")
+            for chk in res.selectors:
+                if not chk.found:
+                    console.print(f"    [red]✗[/red]  [dim]{chk.step_id}[/dim]  {chk.selector}")
+        console.print(
+            "\n  [dim]Note: selectors on later form pages (after clicks or redirects)\n"
+            "  will not be found from the initial page load — this is expected.\n"
+            "  Only flag selectors that were previously found and are now missing.[/dim]\n"
+        )
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    n_pass = sum(1 for r in results if r.status == "pass")
+    n_warn = sum(1 for r in results if r.status == "warn")
+    n_fail = sum(1 for r in results if r.status == "fail")
+
+    parts: list[str] = []
+    if n_pass:
+        parts.append(f"[green]{n_pass} pass[/green]")
+    if n_warn:
+        parts.append(f"[yellow]{n_warn} warn[/yellow]")
+    if n_fail:
+        parts.append(f"[red]{n_fail} fail[/red]")
+    console.print("  " + "  ·  ".join(parts))
+
+    if n_fail:
+        raise typer.Exit(code=1)
+
+
+if __name__ == "__main__":
+    app()

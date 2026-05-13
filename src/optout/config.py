@@ -1,0 +1,137 @@
+"""Pydantic models for user config + XDG-aware loader."""
+
+from __future__ import annotations
+
+import os
+from datetime import date
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, Field, model_validator
+
+# ---------------------------------------------------------------------------
+# Address
+# ---------------------------------------------------------------------------
+
+
+class Address(BaseModel):
+    street: str
+    city: str
+    state: str
+    zip: str
+
+
+class PreviousAddress(BaseModel):
+    street: str
+    city: str
+    state: str
+    zip: str
+    # "from" and "to" are reserved words; use aliases for YAML round-trip
+    from_year: int | None = Field(None, validation_alias="from", serialization_alias="from")
+    to_year: int | None = Field(None, validation_alias="to", serialization_alias="to")
+
+
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
+
+
+class PhoneSet(BaseModel):
+    current: list[str] = []
+    previous: list[str] = []
+
+
+class EmailSet(BaseModel):
+    current: list[str] = []
+    previous: list[str] = []
+
+
+class Profile(BaseModel):
+    legal_name: str
+    aliases: list[str] = []
+    dob: date
+    current_address: Address
+    previous_addresses: list[PreviousAddress] = []
+    phones: PhoneSet
+    emails: EmailSet
+    relatives: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Email / SMTP config
+# ---------------------------------------------------------------------------
+
+
+class SmtpConfig(BaseModel):
+    host: str
+    port: int = 587
+    username: str
+    password_env: str  # name of env var holding the password — never the secret itself
+
+
+class EmailConfig(BaseModel):
+    method: Literal["smtp", "gmail_oauth"]
+    smtp: SmtpConfig | None = None
+
+    @model_validator(mode="after")
+    def _smtp_required_when_method_is_smtp(self) -> EmailConfig:
+        if self.method == "smtp" and self.smtp is None:
+            raise ValueError("email.smtp block is required when method is 'smtp'")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Playwright + Monitoring config
+# ---------------------------------------------------------------------------
+
+
+class PlaywrightConfig(BaseModel):
+    headless: bool = False
+    slow_mo_ms: int = 0
+
+
+class MonitoringConfig(BaseModel):
+    rescan_interval_days: int = 30
+
+
+# ---------------------------------------------------------------------------
+# Top-level UserConfig
+# ---------------------------------------------------------------------------
+
+
+class UserConfig(BaseModel):
+    profile: Profile
+    email: EmailConfig
+    playwright: PlaywrightConfig = PlaywrightConfig()
+    monitoring: MonitoringConfig = MonitoringConfig()
+
+
+# ---------------------------------------------------------------------------
+# Config file location (XDG-compliant)
+# ---------------------------------------------------------------------------
+
+
+def config_dir() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "optout"
+
+
+def config_path() -> Path:
+    return config_dir() / "config.yml"
+
+
+def load_config() -> UserConfig:
+    path = config_path()
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found at {path}. Run `optout init` first.")
+    data = yaml.safe_load(path.read_text())
+    return UserConfig.model_validate(data)
+
+
+def save_config(cfg: UserConfig) -> None:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.dump(cfg.model_dump(by_alias=True, mode="json"), allow_unicode=True))
+    path.chmod(0o600)  # restrict to owner only

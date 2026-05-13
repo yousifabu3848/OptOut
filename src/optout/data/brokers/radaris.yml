@@ -1,0 +1,141 @@
+slug: radaris
+name: Radaris
+domain: radaris.com
+category: people_search
+parent_company: null
+method: web_form
+opt_out_url: "https://radaris.com/control-privacy"
+opt_out_email: "removals@radaris.com"
+opt_out_postal_address: null
+
+required_fields: [full_name, current_address, email_current]
+optional_fields: [dob, aliases, previous_addresses, phones]
+
+requires_listing_url: false
+requires_phone_verification: false
+requires_email_verification: true
+requires_id_upload: false
+requires_notarization: false
+
+legal_basis: [CCPA, CPRA, GDPR]
+statutory_response_days: 30
+re_add_window_days: 60
+
+last_verified_at: 2026-05-10
+notes: |
+  Multi-step funnel at radaris.com/control-privacy (hyphen, not slash — the
+  old /control/privacy URL does not exist).
+
+  Flow (verified 2026-05-12):
+    1. Page loads with all inputs hidden — only div.js-funnel-next-btn is visible.
+    2. Automation clicks div.js-funnel-next-btn to reveal name/city inputs.
+    3. Automation fills name + city/state and clicks the search button.
+    4. User clicks their profile from the results list.
+    5. Page returns to removal view — user clicks "Start Removing".
+    6. Email entry box appears — automation fills it and submits.
+    7. Radaris emails a confirmation link — MUST click it to complete removal.
+
+  NOTE: "Start Removing" (div.funnel-button.c-white) is always hidden in the
+  DOM until a profile is selected via the SPA — it cannot be clicked
+  programmatically. The select_and_remove step asks the user to complete
+  steps 4-5 manually before pressing Enter.
+
+  Selectors verified 2026-05-12:
+    Reveal form: div.js-funnel-next-btn
+    Name:        input[id='topsearch']
+    City/state:  input[id='name_city_state']
+    Search btn:  button.form-submitter
+    Email:       input[id='user_email']
+    Submit:      button.btn-sbmt:not(.get-url-btn)
+                 (two btn-sbmt buttons exist; the first has class get-url-btn — exclude it)
+
+  Radaris operates across multiple TLDs (radaris.com, radaris.eu, etc.).
+  A single submission typically removes you from all properties.
+
+  Data may reappear within ~60 days. Use `optout monitor` to catch this.
+  Fall back to removals@radaris.com if the web form fails.
+
+scan:
+  search_url_template: "https://radaris.com/ng/search?ff={name_first}&fl={name_last}&fs={state_name}"
+  result_selector: "div.teaser-card"
+  match_fields: [full_name, current_address]
+
+steps:
+  - id: open_optout_form
+    type: navigate
+    label: "Open Radaris opt-out form"
+    url: "https://radaris.com/control-privacy"
+
+  - id: click_next_to_reveal_form
+    type: click
+    label: "Reveal search form"
+    selector: "div.js-funnel-next-btn"
+
+  - id: wait_for_form
+    type: wait_for
+    label: "Wait for search form"
+    selector: "input[id='topsearch']"
+    timeout_ms: 10000
+
+  - id: fill_name_city
+    type: form_fill
+    label: "Fill name and city"
+    fields:
+      full_name:
+        selector: "input[id='topsearch']"
+        value: "{profile.legal_name}"
+      city_state:
+        selector: "input[id='name_city_state']"
+        value: "{profile.current_address.city}, {state}"
+
+  - id: submit_search
+    type: click
+    label: "Submit name search"
+    selector: "button.form-submitter"
+
+  - id: select_and_remove
+    type: prompt_user
+    message: >-
+      Search submitted. In the browser window, complete these steps:
+        1. On the profile list, find YOUR name and click it.
+        2. You'll land back on the removal page — click the blue
+           "Start Removing" button.
+        3. The email entry box will appear.
+      Press Enter here once the email entry box is visible on screen.
+
+  - id: wait_for_email_panel
+    type: wait_for
+    label: "Wait for email entry box"
+    selector: "input[id='user_email']"
+    timeout_ms: 60000
+    message: "Waiting for the email entry box to be ready…"
+
+  - id: fill_email
+    type: form_fill
+    label: "Fill email address"
+    fields:
+      email:
+        selector: "input[id='user_email']"
+        value: "{profile.emails.current[0]}"
+
+  - id: submit
+    type: click
+    label: "Submit opt-out request"
+    selector: "button.btn-sbmt:not(.get-url-btn)"
+
+  - id: assert_submit_success
+    type: assert
+    label: "Verify submission accepted"
+    selector: ".confirmation, .success-message, [class*='success'], [class*='confirm'], [class*='funnel'], input[id='user_email']"
+    optional: true
+
+  - id: email_verify
+    type: prompt_user
+    message: >-
+      Radaris has sent a confirmation email to {profile.emails.current[0]}.
+      Please open that email and click the confirmation link NOW, then press Enter.
+
+  - id: capture_confirmation
+    type: capture
+    method: screenshot
+    save_as: "{submission.id}-radaris-confirmation.png"

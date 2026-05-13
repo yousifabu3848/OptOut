@@ -1,0 +1,63 @@
+name: Release to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # Trigger on version tags: v0.1.0, v1.2.3, etc.
+
+permissions:
+  contents: write     # To create a GitHub Release
+  id-token: write     # Required for PyPI trusted publishing (OIDC)
+
+jobs:
+  build-and-publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Verify wheel contents include broker YAMLs
+        run: |
+          uv run python - <<'EOF'
+          import zipfile, sys, pathlib
+
+          wheels = list(pathlib.Path("dist").glob("*.whl"))
+          if not wheels:
+              print("ERROR: no wheel found in dist/", file=sys.stderr)
+              sys.exit(1)
+
+          with zipfile.ZipFile(wheels[0]) as whl:
+              names = whl.namelist()
+
+          yamls = [n for n in names if n.endswith(".yml") and "brokers" in n]
+          if not yamls:
+              print("ERROR: no broker YAMLs found in wheel!", file=sys.stderr)
+              print("Files in wheel:", "\n".join(names[:30]), file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: wheel contains {len(yamls)} broker YAML(s):")
+          for y in sorted(yamls):
+              print(f"  {y}")
+          EOF
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses OIDC trusted publishing — no API token needed.
+        # Configure trusted publishing at: https://pypi.org/manage/project/optout/settings/publishing/
+        # Set: owner=Blake104, repo=OptOut, workflow=release.yml
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

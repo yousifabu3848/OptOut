@@ -1,0 +1,57 @@
+Dear {{ broker.name }} Privacy Team,
+
+I am exercising my rights under applicable privacy law to request the deletion
+of all personal information that {{ broker.name }} ({{ broker.domain }}) holds
+about me, and to opt me out of all data collection, sale, and sharing.
+
+------------------------------------------------------------
+INFORMATION TO LOCATE MY RECORDS
+------------------------------------------------------------
+
+Full legal name:  {{ profile.legal_name }}
+{% if profile.aliases %}
+Also known as:    {{ profile.aliases | join(", ") }}
+{% endif %}
+Date of birth:    {{ profile.dob }}
+Current address:  {{ profile.current_address.street }}, {{ profile.current_address.city }}, {{ profile.current_address.state }} {{ profile.current_address.zip }}
+{% for addr in profile.previous_addresses %}
+Previous address: {{ addr.street }}, {{ addr.city }}, {{ addr.state }} {{ addr.zip }}{% if addr.from_year %} ({{ addr.from_year }}–{{ addr.to_year if addr.to_year else "present" }}){% endif %}
+{% endfor %}
+{% if profile.phones.current %}
+Current phone:    {{ profile.phones.current | join(", ") }}
+{% endif %}
+{% if profile.emails.current %}
+Current email:    {{ profile.emails.current | join(", ") }}
+{% endif %}
+{% if profile.relatives %}
+Associated names: {{ profile.relatives | join(", ") }}
+{% endif %}
+
+------------------------------------------------------------
+LEGAL BASIS FOR THIS REQUEST
+------------------------------------------------------------
+{% for s in statutes %}
+{{ s.citation }} — {{ s.name }}
+  "{{ s.right_text }}"
+  Statutory response deadline: {{ s.response_days }} days. {{ s.response_note }}
+{% endfor %}
+
+------------------------------------------------------------
+WHAT I AM REQUESTING
+------------------------------------------------------------
+
+1. Delete all personal information associated with me from your databases,
+   including any profiles, listings, records, or derived data.
+2. Opt me out of all future data collection, sale, and sharing of my personal
+   information.
+3. Confirm in writing that this request has been fulfilled within
+   {{ broker.statutory_response_days }} days as required by applicable law.
+
+I am the data subject making this request entirely on my own behalf. This
+request is not being submitted through an authorized agent or third-party
+service.
+
+Sincerely,
+{{ profile.legal_name }}
+{% if profile.emails.current %}{{ profile.emails.current | first }}{% endif %}
+{% if profile.phones.current %}{{ profile.phones.current | first }}{% endif %}

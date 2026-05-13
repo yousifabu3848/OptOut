@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run mypy src/optout/
+
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - run: uv run pytest --tb=short -q
+
+  validate-brokers:
+    name: Validate broker YAMLs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Validate every broker YAML against schema
+        run: |
+          uv run python - <<'EOF'
+          import sys
+          from importlib.resources import files
+          from pathlib import Path
+          from optout.brokers.loader import load_all_brokers
+
+          brokers_dir = Path(str(files("optout").joinpath("data/brokers")))
+          if not brokers_dir.exists():
+              print(f"brokers dir not found: {brokers_dir}", file=sys.stderr)
+              sys.exit(1)
+
+          yamls = sorted(brokers_dir.glob("*.yml"))
+          if not yamls:
+              print(f"No YAML files found in {brokers_dir}", file=sys.stderr)
+              sys.exit(1)
+
+          try:
+              brokers = load_all_brokers(brokers_dir)
+          except ValueError as e:
+              print(f"Broker validation failed:\n{e}", file=sys.stderr)
+              sys.exit(1)
+
+          for b in brokers:
+              if b.slug != (brokers_dir / f"{b.slug}.yml").stem:
+                  print(
+                      f"ERROR: slug '{b.slug}' does not match filename",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+
+          print(f"OK: {len(brokers)} broker(s) validated successfully")
+          for b in brokers:
+              print(f"  {b.slug} ({b.method})")
+          EOF
